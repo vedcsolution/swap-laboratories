@@ -3,7 +3,6 @@ groups:
         exclusive: true
         members:
             - MiniMax-M2.5-AWQ
-            - MiniMax-M2.5-AWQ-Optimized
             - Qwen/Qwen3-Coder-Next-FP8
             - gpt-oss-120b
         swap: true
@@ -49,29 +48,18 @@ models:
         useModelName: glm-4.7-flash
     MiniMax-M2.5-AWQ:
         aliases:
-            - QuantTrio/MiniMax-M2.5-AWQ
+            - MiniMax-M2.5-AWQ
+            - cyankiwi/MiniMax-M2.5-AWQ-4bit
         checkEndpoint: /health
         cmd: bash -lc '${vllm_stop_cluster}; exec ${recipe_runner} minimax-m2.5-awq -n ${vllm_nodes} --tp 2 --port ${PORT}'
         cmdStop: |
             bash -lc '${vllm_stop_cluster}'
-        description: vLLM QuantTrio--AWQ
+        description: vLLM cyankiwi/MiniMax-M2.5-AWQ-4bit
         name: MiniMax-M2.5-AWQ
         proxy: http://127.0.0.1:${PORT}
         ttl: 0
-        useModelName: minimax-m2.5-awq
-    MiniMax-M2.5-AWQ-Optimized:
-        aliases:
-            - QuantTrio/MiniMax-M2.5-AWQ-optimized
-            - minimax-m2.5-awq-optimized
-        checkEndpoint: /health
-        cmd: bash -lc '${vllm_stop_cluster}; export VLLM_SPARK_EXTRA_DOCKER_ARGS="-e FLASHINFER_DISABLE_VERSION_CHECK=1 -e VLLM_MARLIN_INPUT_DTYPE=fp8 -e VLLM_MARLIN_USE_ATOMIC_ADD=1 -e VLLM_USE_FLASHINFER_MOE_FP16=1 -e VLLM_USE_FLASHINFER_SAMPLER=1"; exec ${recipe_runner} ${llama_root}/recipes/minimax-m2.5-awq-optimized-marlin.yaml -t ${vllm_marlin_image} -n ${vllm_nodes} --tp 2 --gpu-mem 0.88 --max-model-len 185000 --port ${PORT}'
-        cmdStop: |
-            bash -lc '${vllm_stop_cluster}'
-        description: vLLM QuantTrio--AWQ (optimized)
-        name: MiniMax-M2.5-AWQ-Optimized
-        proxy: http://127.0.0.1:${PORT}
-        ttl: 0
-        useModelName: minimax-m2.5-awq
+        useModelName: cyankiwi/MiniMax-M2.5-AWQ-4bit
+   
     Nemotron-3-Nano-NVFP4:
         aliases:
             - nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4-nano
@@ -113,12 +101,24 @@ models:
         useModelName: Qwen/Qwen3-Coder-Next-FP8
     gpt-oss-120b:
         aliases:
+            - gpt-oss-120b
             - openai/gpt-oss-120b
         checkEndpoint: /health
         cmd: bash -lc '${vllm_stop_cluster}; exec ${recipe_runner} openai-gpt-oss-120b -n ${vllm_nodes} --tp 2 --port ${PORT}'
         cmdStop: |
             bash -lc '${vllm_stop_cluster}'
         description: vLLM MXFP4
+        metadata:
+            benchy:
+                trust_remote_code: false
+            recipe_ui:
+                backend_dir: /home/csolutions_ai/spark-vllm-docker
+                group: big-ones
+                managed: true
+                mode: cluster
+                nodes: ${vllm_nodes}
+                recipe_ref: openai-gpt-oss-120b
+                tensor_parallel: 2
         name: GPT-OSS 120B
         proxy: http://127.0.0.1:${PORT}
         ttl: 0
