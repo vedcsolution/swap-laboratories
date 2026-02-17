@@ -3,6 +3,7 @@ package proxy
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -341,6 +342,7 @@ func probeSSH(parent context.Context, host string, timeout time.Duration) (ok bo
 		"ssh",
 		"-o", "BatchMode=yes",
 		"-o", "ConnectTimeout=5",
+		"-o", "ConnectionAttempts=2",
 		"-o", "StrictHostKeyChecking=no",
 		host,
 		"true",
@@ -352,6 +354,12 @@ func probeSSH(parent context.Context, host string, timeout time.Duration) (ok bo
 	latencyMs = time.Since(start).Milliseconds()
 	if runErr != nil {
 		msg := strings.TrimSpace(output.String())
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) || errors.Is(ctx.Err(), context.Canceled) || errorsIsContextCanceled(runErr) {
+			if msg == "" {
+				msg = runErr.Error()
+			}
+			return false, latencyMs, fmt.Errorf("ssh timeout/canceled: %s", msg)
+		}
 		if msg == "" {
 			msg = runErr.Error()
 		}

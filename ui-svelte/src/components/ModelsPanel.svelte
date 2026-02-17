@@ -33,7 +33,7 @@
   let benchyPollTimer: ReturnType<typeof setTimeout> | null = null;
 
   let benchyBusy = $derived.by(() => {
-    return benchyStarting || benchyJob?.status === "running";
+    return benchyStarting || benchyJob?.status === "running" || benchyJob?.status === "scheduled";
   });
 
   let filteredModels = $derived.by(() => {
@@ -115,7 +115,7 @@
       const job = await getBenchyJob(jobID);
       benchyJob = job;
 
-      if (job.status === "running") {
+      if (job.status === "running" || job.status === "scheduled") {
         benchyPollTimer = setTimeout(() => {
           void pollBenchy(jobID);
         }, 1000);

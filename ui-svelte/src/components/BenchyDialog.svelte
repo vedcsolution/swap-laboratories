@@ -41,6 +41,7 @@
   const datasetCacheDirStore = persistentStore<string>("benchy-options-dataset-cache-dir", "");
   const outputDirStore = persistentStore<string>("benchy-options-output-dir", "/tmp/llama-benchy-runs");
   const maxConcurrentStore = persistentStore<string>("benchy-options-max-concurrent", "");
+  const startAtStore = persistentStore<string>("benchy-options-start-at", "");
 
   const intelligencePluginOptions: Array<{ id: BenchyIntelligencePlugin; label: string }> = [
     { id: "mmlu", label: "MMLU" },
@@ -109,6 +110,16 @@
     return value === "true";
   }
 
+  function parseStartAt(raw: string): string | undefined {
+    const cleaned = raw.trim();
+    if (!cleaned) return undefined;
+    const dt = new Date(cleaned);
+    if (Number.isNaN(dt.getTime())) {
+      throw new Error("start time is invalid");
+    }
+    return dt.toISOString();
+  }
+
   function parseQueueModels(raw: string): string[] {
     return raw
       .split(/[\n,]+/)
@@ -131,7 +142,7 @@
   }
 
   function handleStart(): void {
-    if (!canStart || starting || job?.status === "running") return;
+    if (!canStart || starting || job?.status === "running" || job?.status === "scheduled") return;
     optionsError = null;
 
     try {
@@ -144,6 +155,7 @@
       const depth = parseNumberList($depthStore, "depth", 0);
       const concurrency = parseNumberList($concurrencyStore, "concurrency", 1);
       const maxConcurrent = parsePositiveNumber($maxConcurrentStore, "maxConcurrent");
+      const startAt = parseStartAt($startAtStore);
       const selectedPlugins = [...$intelligencePluginsStore];
       const queueModels = parseQueueModels($queueModelsStore);
 
@@ -154,6 +166,7 @@
       if (depth?.length) opts.depth = depth;
       if (concurrency?.length) opts.concurrency = concurrency;
       if (runs !== undefined) opts.runs = runs;
+      if (startAt) opts.startAt = startAt;
       if ($latencyModeStore) opts.latencyMode = $latencyModeStore;
       if ($noCacheStore) opts.noCache = true;
       if ($noWarmupStore) opts.noWarmup = true;
@@ -242,6 +255,9 @@
           <label class="text-sm">
             <div class="text-txtsecondary mb-1">Tokenizer (optional)</div>
             <input class="w-full px-2 py-1 rounded border border-card-border bg-background" bind:value={$tokenizerStore} placeholder="auto from metadata/model" />
+            {#if $enableQueueStore && $tokenizerStore.trim()}
+              <div class="mt-1 text-xs text-amber-300">Se aplicará a todos los modelos de la cola. Déjalo vacío para auto por modelo.</div>
+            {/if}
           </label>
           <label class="text-sm">
             <div class="text-txtsecondary mb-1">Base URL (optional)</div>
@@ -271,6 +287,11 @@
           <label class="text-sm">
             <div class="text-txtsecondary mb-1">runs</div>
             <input class="w-full px-2 py-1 rounded border border-card-border bg-background font-mono" bind:value={$runsStore} placeholder="5" />
+          </label>
+          <label class="text-sm">
+            <div class="text-txtsecondary mb-1">programar hora (optional)</div>
+            <input class="w-full px-2 py-1 rounded border border-card-border bg-background" type="datetime-local" bind:value={$startAtStore} />
+            <div class="mt-1 text-xs text-txtsecondary">Usa hora local del navegador; el backend la convierte a UTC.</div>
           </label>
           <label class="text-sm">
             <div class="text-txtsecondary mb-1">latency mode</div>
@@ -417,6 +438,11 @@
           <div>
             Base URL: <span class="font-mono break-all text-txtmain">{job.baseUrl}</span>
           </div>
+          {#if job.scheduledAt}
+            <div>
+              scheduled at: <span class="font-mono text-txtmain">{new Date(job.scheduledAt).toLocaleString()}</span>
+            </div>
+          {/if}
           <div>
             pp: <span class="font-mono text-txtmain">{job.pp.join(" ")}</span> | tg:
             <span class="font-mono text-txtmain">{job.tg.join(" ")}</span> | runs:
@@ -487,11 +513,11 @@
       <button
         onclick={handleStart}
         class="btn btn--sm"
-        disabled={!canStart || starting || job?.status === "running"}
+        disabled={!canStart || starting || job?.status === "running" || job?.status === "scheduled"}
       >
         {job ? "Run Again" : "Run"}
       </button>
-      {#if job?.status === "running"}
+      {#if job?.status === "running" || job?.status === "scheduled"}
         <button onclick={oncancel} class="btn btn--sm">Cancel</button>
       {/if}
       <button onclick={() => dialogEl?.close()} class="btn">Close</button>

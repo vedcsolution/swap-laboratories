@@ -4,12 +4,7 @@ groups:
         members:
             - MiniMax-M2.5-AWQ
             - Qwen/Qwen3-Coder-Next-FP8
-            - Qwen/Qwen3-Coder-Next-vLLM-NEXT
             - gpt-oss-120b
-        swap: true
-    managed-recipes:
-        exclusive: true
-        members: []
         swap: true
     medium:
         exclusive: true
@@ -103,27 +98,6 @@ models:
         ttl: 0
         unlisted: false
         useModelName: Qwen/Qwen3-Coder-Next-FP8
-    Qwen/Qwen3-Coder-Next-vLLM-NEXT:
-        aliases: []
-        checkEndpoint: /health
-        cmd: bash -lc '${vllm_stop_cluster}; exec ${recipe_runner} qwen3-coder-next-vllm-next --solo --tp 1 --port ${PORT} --gpu-mem 0.9 --max-model-len 185000 -- --enable-prefix-caching'
-        cmdStop: bash -lc '${vllm_stop_cluster}'
-        description: vLLM NEXT Intel/Qwen3-Coder-Next-int4-AutoRound (solo)
-        metadata:
-            recipe_ui:
-                backend_dir: /home/csolutions_ai/spark-vllm-docker
-                extra_args: --gpu-mem 0.9 --max-model-len 185000 -- --enable-prefix-caching
-                group: big-ones
-                managed: true
-                mode: solo
-                nodes: ""
-                recipe_ref: qwen3-coder-next-vllm-next
-                tensor_parallel: 1
-        name: Qwen3-Coder-Next-vLLM-NEXT
-        proxy: http://127.0.0.1:${PORT}
-        ttl: 0
-        unlisted: false
-        useModelName: Intel/Qwen3-Coder-Next-int4-AutoRound
     gpt-oss-120b:
         aliases:
             - gpt-oss-120b

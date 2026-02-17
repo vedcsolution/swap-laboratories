@@ -214,6 +214,11 @@ These help apply canary settings (`keep-alive`, `ctrl-loss`, reconnect delay, qu
 
 The `Cluster` UI now also shows a storage baseline matrix (per-node path presence) to highlight potential duplicated local caches and track optimization toward a shared read path.
 
+Related pending plans:
+
+- docs/pending/nvmeof-overlayfs-cache-strategy.md
+- docs/pending/prefetch-sidecar-ttft-and-nvmeof-canary.md
+
 ## Troubleshooting
 
 ### Benchy: `plugin 'swebench_verified' requires allowCodeExec=true`

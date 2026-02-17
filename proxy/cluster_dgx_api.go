@@ -3,6 +3,7 @@ package proxy
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os/exec"
@@ -232,6 +233,7 @@ func runClusterNodeShell(ctx context.Context, host string, isLocal bool, script 
 			"ssh",
 			"-o", "BatchMode=yes",
 			"-o", "ConnectTimeout=8",
+			"-o", "ConnectionAttempts=2",
 			"-o", "StrictHostKeyChecking=no",
 			host,
 			fmt.Sprintf("bash -lc %s", shellQuote(script)),
@@ -243,6 +245,16 @@ func runClusterNodeShell(ctx context.Context, host string, isLocal bool, script 
 	cmd.Stderr = &output
 	if err := cmd.Run(); err != nil {
 		msg := strings.TrimSpace(output.String())
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) || errors.Is(ctx.Err(), context.Canceled) || errorsIsContextCanceled(err) {
+			if msg == "" {
+				if ctxErr := ctx.Err(); ctxErr != nil {
+					msg = ctxErr.Error()
+				} else {
+					msg = err.Error()
+				}
+			}
+			return "", fmt.Errorf("cluster shell timeout/canceled: %s", msg)
+		}
 		if msg == "" {
 			msg = err.Error()
 		}
@@ -275,47 +287,67 @@ func discoverClusterNodeIPs(parentCtx context.Context) ([]string, string, error)
 }
 
 func parseDBusBoolResult(raw string) (bool, error) {
-	line := firstNonEmptyLine(raw)
-	if line == "" {
+	first := ""
+	for _, line := range strings.Split(raw, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if first == "" {
+			first = trimmed
+		}
+		if !strings.HasPrefix(trimmed, "b ") {
+			continue
+		}
+		value := strings.TrimSpace(strings.TrimPrefix(trimmed, "b "))
+		switch value {
+		case "true":
+			return true, nil
+		case "false":
+			return false, nil
+		default:
+			return false, fmt.Errorf("unexpected boolean value: %s", value)
+		}
+	}
+	if first == "" {
 		return false, fmt.Errorf("empty output")
 	}
-	if !strings.HasPrefix(line, "b ") {
-		return false, fmt.Errorf("unexpected format: %s", line)
-	}
-	value := strings.TrimSpace(strings.TrimPrefix(line, "b "))
-	switch value {
-	case "true":
-		return true, nil
-	case "false":
-		return false, nil
-	default:
-		return false, fmt.Errorf("unexpected boolean value: %s", value)
-	}
+	return false, fmt.Errorf("unexpected format: %s", first)
 }
 
 func parseDBusIntStringResult(raw string) (int, string, error) {
-	line := firstNonEmptyLine(raw)
-	if line == "" {
+	first := ""
+	for _, line := range strings.Split(raw, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if first == "" {
+			first = trimmed
+		}
+		if !strings.HasPrefix(trimmed, "is ") {
+			continue
+		}
+		rest := strings.TrimSpace(strings.TrimPrefix(trimmed, "is "))
+		firstSpace := strings.Index(rest, " ")
+		if firstSpace <= 0 {
+			return 0, "", fmt.Errorf("invalid integer/string pair: %s", trimmed)
+		}
+		progressRaw := strings.TrimSpace(rest[:firstSpace])
+		progress, err := strconv.Atoi(progressRaw)
+		if err != nil {
+			return 0, "", fmt.Errorf("invalid progress value: %w", err)
+		}
+
+		stateRaw := strings.TrimSpace(rest[firstSpace+1:])
+		stateRaw = strings.TrimPrefix(stateRaw, "\"")
+		stateRaw = strings.TrimSuffix(stateRaw, "\"")
+		return progress, stateRaw, nil
+	}
+	if first == "" {
 		return 0, "", fmt.Errorf("empty output")
 	}
-	if !strings.HasPrefix(line, "is ") {
-		return 0, "", fmt.Errorf("unexpected format: %s", line)
-	}
-	rest := strings.TrimSpace(strings.TrimPrefix(line, "is "))
-	firstSpace := strings.Index(rest, " ")
-	if firstSpace <= 0 {
-		return 0, "", fmt.Errorf("invalid integer/string pair: %s", line)
-	}
-	progressRaw := strings.TrimSpace(rest[:firstSpace])
-	progress, err := strconv.Atoi(progressRaw)
-	if err != nil {
-		return 0, "", fmt.Errorf("invalid progress value: %w", err)
-	}
-
-	stateRaw := strings.TrimSpace(rest[firstSpace+1:])
-	stateRaw = strings.TrimPrefix(stateRaw, "\"")
-	stateRaw = strings.TrimSuffix(stateRaw, "\"")
-	return progress, stateRaw, nil
+	return 0, "", fmt.Errorf("unexpected format: %s", first)
 }
 
 func firstNonEmptyLine(raw string) string {

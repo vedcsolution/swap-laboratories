@@ -229,6 +229,7 @@ export async function startBenchy(model: string, opts: BenchyStartOptions = {}):
     datasetCacheDir: opts.datasetCacheDir,
     outputDir: opts.outputDir,
     maxConcurrent: opts.maxConcurrent,
+    startAt: opts.startAt,
   };
 
   const response = await fetch(`/api/benchy`, {
@@ -302,13 +303,19 @@ export async function setRecipeBackend(backendDir: string): Promise<RecipeBacken
   return (await response.json()) as RecipeBackendState;
 }
 
-export async function runRecipeBackendAction(action: RecipeBackendAction): Promise<RecipeBackendActionResponse> {
+export async function runRecipeBackendAction(
+  action: RecipeBackendAction,
+  opts?: { sourceImage?: string },
+): Promise<RecipeBackendActionResponse> {
   const response = await fetch(`/api/recipes/backend/action`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ action }),
+    body: JSON.stringify({
+      action,
+      sourceImage: opts?.sourceImage,
+    }),
   });
 
   const responseText = await response.text();

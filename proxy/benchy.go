@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -21,10 +22,11 @@ import (
 type BenchyJobStatus string
 
 const (
-	benchyStatusRunning  BenchyJobStatus = "running"
-	benchyStatusDone     BenchyJobStatus = "done"
-	benchyStatusError    BenchyJobStatus = "error"
-	benchyStatusCanceled BenchyJobStatus = "canceled"
+	benchyStatusScheduled BenchyJobStatus = "scheduled"
+	benchyStatusRunning   BenchyJobStatus = "running"
+	benchyStatusDone      BenchyJobStatus = "done"
+	benchyStatusError     BenchyJobStatus = "error"
+	benchyStatusCanceled  BenchyJobStatus = "canceled"
 )
 
 var (
@@ -74,30 +76,31 @@ var benchyPluginsRequireCodeExec = map[string]struct{}{
 }
 
 type BenchyJob struct {
-	ID                  string   `json:"id"`
-	Model               string   `json:"model"`
-	QueueModels         []string `json:"queueModels,omitempty"`
-	QueueCurrentIndex   int      `json:"queueCurrentIndex,omitempty"`
-	QueueCurrentModel   string   `json:"queueCurrentModel,omitempty"`
-	QueueCompletedCount int      `json:"queueCompletedCount,omitempty"`
-	Tokenizer           string   `json:"tokenizer"`
-	BaseURL             string   `json:"baseUrl"`
-	PP                  []int    `json:"pp"`
-	TG                  []int    `json:"tg"`
-	Depth               []int    `json:"depth,omitempty"`
-	Concurrency         []int    `json:"concurrency,omitempty"`
-	Runs                int      `json:"runs"`
-	LatencyMode         string   `json:"latencyMode,omitempty"`
-	NoCache             bool     `json:"noCache,omitempty"`
-	NoWarmup            bool     `json:"noWarmup,omitempty"`
-	AdaptPrompt         *bool    `json:"adaptPrompt,omitempty"`
-	EnablePrefixCaching bool     `json:"enablePrefixCaching,omitempty"`
-	EnableIntelligence  bool     `json:"enableIntelligence,omitempty"`
-	IntelligencePlugins []string `json:"intelligencePlugins,omitempty"`
-	AllowCodeExec       bool     `json:"allowCodeExec,omitempty"`
-	DatasetCacheDir     string   `json:"datasetCacheDir,omitempty"`
-	OutputDir           string   `json:"outputDir,omitempty"`
-	MaxConcurrent       *int     `json:"maxConcurrent,omitempty"`
+	ID                  string     `json:"id"`
+	Model               string     `json:"model"`
+	QueueModels         []string   `json:"queueModels,omitempty"`
+	QueueCurrentIndex   int        `json:"queueCurrentIndex,omitempty"`
+	QueueCurrentModel   string     `json:"queueCurrentModel,omitempty"`
+	QueueCompletedCount int        `json:"queueCompletedCount,omitempty"`
+	Tokenizer           string     `json:"tokenizer"`
+	ScheduledAt         *time.Time `json:"scheduledAt,omitempty"`
+	BaseURL             string     `json:"baseUrl"`
+	PP                  []int      `json:"pp"`
+	TG                  []int      `json:"tg"`
+	Depth               []int      `json:"depth,omitempty"`
+	Concurrency         []int      `json:"concurrency,omitempty"`
+	Runs                int        `json:"runs"`
+	LatencyMode         string     `json:"latencyMode,omitempty"`
+	NoCache             bool       `json:"noCache,omitempty"`
+	NoWarmup            bool       `json:"noWarmup,omitempty"`
+	AdaptPrompt         *bool      `json:"adaptPrompt,omitempty"`
+	EnablePrefixCaching bool       `json:"enablePrefixCaching,omitempty"`
+	EnableIntelligence  bool       `json:"enableIntelligence,omitempty"`
+	IntelligencePlugins []string   `json:"intelligencePlugins,omitempty"`
+	AllowCodeExec       bool       `json:"allowCodeExec,omitempty"`
+	DatasetCacheDir     string     `json:"datasetCacheDir,omitempty"`
+	OutputDir           string     `json:"outputDir,omitempty"`
+	MaxConcurrent       *int       `json:"maxConcurrent,omitempty"`
 	// TrustRemoteCode controls whether we auto-accept the HuggingFace "custom code" prompt for some tokenizers.
 	// This only affects local tokenizer loading, not the remote server.
 	TrustRemoteCode bool `json:"trustRemoteCode,omitempty"`
@@ -117,6 +120,7 @@ type benchyStartRequest struct {
 	QueueModels         []string `json:"queueModels,omitempty"`
 	Tokenizer           string   `json:"tokenizer,omitempty"`
 	BaseURL             string   `json:"baseUrl,omitempty"`
+	StartAt             string   `json:"startAt,omitempty"`
 	PP                  []int    `json:"pp,omitempty"`
 	TG                  []int    `json:"tg,omitempty"`
 	Depth               []int    `json:"depth,omitempty"`
@@ -142,6 +146,7 @@ type benchyRunOptions struct {
 	TG                  []int
 	Depth               []int
 	Concurrency         []int
+	StartAt             *time.Time
 	Runs                int
 	LatencyMode         string
 	NoCache             bool
@@ -292,6 +297,16 @@ func (pm *ProxyManager) apiStartBenchy(c *gin.Context) {
 		maxConcurrent = &v
 	}
 
+	startAt, err := parseBenchyStartAt(req.StartAt)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if startAt != nil && startAt.Before(time.Now().Add(-5*time.Second)) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "startAt is in the past"})
+		return
+	}
+
 	fixedTokenizer := strings.TrimSpace(req.Tokenizer)
 
 	var adaptPrompt *bool
@@ -304,6 +319,7 @@ func (pm *ProxyManager) apiStartBenchy(c *gin.Context) {
 		TG:                  tg,
 		Depth:               depth,
 		Concurrency:         concurrency,
+		StartAt:             startAt,
 		Runs:                runs,
 		LatencyMode:         latencyMode,
 		NoCache:             req.NoCache,
@@ -344,10 +360,16 @@ func (pm *ProxyManager) apiStartBenchy(c *gin.Context) {
 		tokenizer = pm.defaultBenchyTokenizer(resolvedModels[0].RealModelName)
 	}
 
+	jobStatus := benchyStatusRunning
+	if startAt != nil && startAt.After(time.Now().Add(2*time.Second)) {
+		jobStatus = benchyStatusScheduled
+	}
+
 	job := &BenchyJob{
 		ID:                  jobID,
 		Model:               resolvedModels[0].RequestedModel,
 		Tokenizer:           tokenizer,
+		ScheduledAt:         startAt,
 		BaseURL:             baseURL,
 		PP:                  append([]int{}, runOptions.PP...),
 		TG:                  append([]int{}, runOptions.TG...),
@@ -366,7 +388,7 @@ func (pm *ProxyManager) apiStartBenchy(c *gin.Context) {
 		OutputDir:           runOptions.OutputDir,
 		MaxConcurrent:       runOptions.MaxConcurrent,
 		TrustRemoteCode:     pm.resolveBenchyTrustRemoteCode(resolvedModels[0].RealModelName, req.TrustRemoteCode),
-		Status:              benchyStatusRunning,
+		Status:              jobStatus,
 		StartedAt:           time.Now(),
 	}
 	if len(resolvedModels) > 1 {
@@ -444,6 +466,14 @@ func (pm *ProxyManager) apiCancelBenchyJob(c *gin.Context) {
 }
 
 func (pm *ProxyManager) runBenchyJob(ctx context.Context, jobID, displayModelName, servedModelName, tokenizer, baseURL, apiKey string, opts benchyRunOptions) {
+	if err := pm.waitForScheduledBenchyStart(ctx, jobID, opts.StartAt); err != nil {
+		if errors.Is(err, context.Canceled) {
+			pm.finishBenchyJob(jobID, benchyStatusCanceled, nil, nil)
+			return
+		}
+		pm.finishBenchyJob(jobID, benchyStatusError, nil, err)
+		return
+	}
 	status, exitCode, err := pm.executeBenchyProcess(ctx, jobID, displayModelName, servedModelName, tokenizer, baseURL, apiKey, opts)
 	pm.finishBenchyJob(jobID, status, exitCode, err)
 }
@@ -465,6 +495,15 @@ func (pm *ProxyManager) runBenchyQueueJob(
 		return
 	}
 
+	if err := pm.waitForScheduledBenchyStart(ctx, queueJobID, opts.StartAt); err != nil {
+		if errors.Is(err, context.Canceled) {
+			pm.finishBenchyJob(queueJobID, benchyStatusCanceled, nil, nil)
+			return
+		}
+		pm.finishBenchyJob(queueJobID, benchyStatusError, nil, err)
+		return
+	}
+
 	for idx, model := range models {
 		if errors.Is(ctx.Err(), context.Canceled) {
 			pm.finishBenchyJob(queueJobID, benchyStatusCanceled, nil, nil)
@@ -479,11 +518,11 @@ func (pm *ProxyManager) runBenchyQueueJob(
 		)
 
 		if err := pm.ensureBenchyModelReady(ctx, model.RealModelName); err != nil {
-			pm.stopBenchyModel(model.RealModelName)
 			if errors.Is(err, context.Canceled) {
 				pm.finishBenchyJob(queueJobID, benchyStatusCanceled, nil, nil)
 				return
 			}
+			pm.stopBenchyModel(model.RealModelName)
 			pm.finishBenchyJob(queueJobID, benchyStatusError, nil, fmt.Errorf("failed to load model %s: %w", model.RequestedModel, err))
 			return
 		}
@@ -565,6 +604,9 @@ func (pm *ProxyManager) executeBenchyProcess(
 		if shimDir := pm.benchyPythonShimDir(); shimDir != "" {
 			cmd.Env = prependEnvPathList(cmd.Env, "PYTHONPATH", shimDir)
 			cmd.Env = setOrReplaceEnv(cmd.Env, benchyEnvSwebenchShim, "1")
+			pm.appendBenchyOutput(jobID, "stdout", fmt.Sprintf("[benchy] swebench shim enabled: %s\n", shimDir))
+		} else {
+			pm.appendBenchyOutput(jobID, "stdout", "[benchy] swebench shim unavailable; proceeding without text-compat patch\n")
 		}
 	}
 	cmd.Stdout = benchyJobWriter{pm: pm, jobID: jobID, stream: "stdout"}
@@ -580,16 +622,43 @@ func (pm *ProxyManager) executeBenchyProcess(
 		return benchyStatusError, nil, startErr
 	}
 
-	waitErr := cmd.Wait()
-	if waitErr != nil {
-		// Context cancellation should map to canceled even if Wait returns an error.
-		if errors.Is(ctx.Err(), context.Canceled) {
-			return benchyStatusCanceled, exitCodeFromErr(waitErr), nil
+	waitCh := make(chan error, 1)
+	go func() {
+		waitCh <- cmd.Wait()
+	}()
+
+	select {
+	case waitErr := <-waitCh:
+		if waitErr != nil {
+			// Context cancellation should map to canceled even if Wait returns an error.
+			if errors.Is(ctx.Err(), context.Canceled) {
+				killBenchyProcessBySignature(baseURL, servedModelName)
+				return benchyStatusCanceled, exitCodeFromErr(waitErr), nil
+			}
+			return benchyStatusError, exitCodeFromErr(waitErr), waitErr
 		}
-		return benchyStatusError, exitCodeFromErr(waitErr), waitErr
+		return benchyStatusDone, intPtr(0), nil
+	case <-ctx.Done():
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		go func() {
+			<-waitCh
+		}()
+		killBenchyProcessBySignature(baseURL, servedModelName)
+		return benchyStatusCanceled, nil, nil
+	}
+}
+
+func killBenchyProcessBySignature(baseURL, servedModelName string) {
+	base := strings.TrimSpace(baseURL)
+	served := strings.TrimSpace(servedModelName)
+	if base == "" || served == "" {
+		return
 	}
 
-	return benchyStatusDone, intPtr(0), nil
+	pattern := fmt.Sprintf("llama-benchy .*--base-url %s .*--served-model-name %s", regexp.QuoteMeta(base), regexp.QuoteMeta(served))
+	_ = exec.Command("pkill", "-f", pattern).Run()
 }
 
 type benchyJobWriter struct {
@@ -740,9 +809,21 @@ func (pm *ProxyManager) ensureBenchyModelReady(ctx context.Context, realModelNam
 		return err
 	}
 	discardWriter := &DiscardWriter{}
-	proxyErr := processGroup.ProxyRequest(realModelName, discardWriter, req)
-	if proxyErr != nil && process.CurrentState() != StateReady {
-		return proxyErr
+	proxyDone := make(chan error, 1)
+	go func() {
+		proxyDone <- processGroup.ProxyRequest(realModelName, discardWriter, req)
+	}()
+
+	select {
+	case <-ctx.Done():
+		// ProxyRequest can block while the model is still loading.
+		// Force-stop the process so benchy cancel returns promptly.
+		go process.StopImmediately()
+		return ctx.Err()
+	case proxyErr := <-proxyDone:
+		if proxyErr != nil && process.CurrentState() != StateReady {
+			return proxyErr
+		}
 	}
 
 	readyDeadline := time.Now().Add(time.Duration(pm.config.HealthCheckTimeout+10) * time.Second)
@@ -758,13 +839,16 @@ func (pm *ProxyManager) ensureBenchyModelReady(ctx context.Context, realModelNam
 			}
 		}
 
-		if errors.Is(ctx.Err(), context.Canceled) {
-			return ctx.Err()
-		}
 		if time.Now().After(readyDeadline) {
 			return fmt.Errorf("timed out waiting for model %s to be ready", realModelName)
 		}
-		time.Sleep(250 * time.Millisecond)
+
+		select {
+		case <-ctx.Done():
+			go process.StopImmediately()
+			return ctx.Err()
+		case <-time.After(250 * time.Millisecond):
+		}
 	}
 }
 
@@ -956,6 +1040,76 @@ func benchyTrustRemoteCodeFromMetadata(meta map[string]any) (bool, bool) {
 	}
 
 	return false, false
+}
+
+func parseBenchyStartAt(raw string) (*time.Time, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+
+	if t, err := time.Parse(time.RFC3339Nano, raw); err == nil {
+		return &t, nil
+	}
+	if t, err := time.Parse(time.RFC3339, raw); err == nil {
+		return &t, nil
+	}
+
+	layouts := []string{
+		"2006-01-02T15:04",
+		"2006-01-02T15:04:05",
+		"2006-01-02 15:04",
+		"2006-01-02 15:04:05",
+	}
+	for _, layout := range layouts {
+		if t, err := time.ParseInLocation(layout, raw, time.Local); err == nil {
+			return &t, nil
+		}
+	}
+
+	return nil, errors.New("startAt must be RFC3339 or yyyy-mm-ddThh:mm")
+}
+
+func (pm *ProxyManager) waitForScheduledBenchyStart(ctx context.Context, jobID string, startAt *time.Time) error {
+	if startAt == nil {
+		pm.setBenchyRuntimeStatus(jobID, benchyStatusRunning)
+		return nil
+	}
+
+	target := startAt.UTC()
+	now := time.Now().UTC()
+	delay := time.Until(target)
+	if delay <= 0 {
+		pm.appendBenchyOutput(jobID, "stdout", fmt.Sprintf("[benchy] scheduled time reached (%s), starting now\n", target.Format(time.RFC3339)))
+		pm.setBenchyRuntimeStatus(jobID, benchyStatusRunning)
+		return nil
+	}
+
+	pm.appendBenchyOutput(jobID, "stdout", fmt.Sprintf("[benchy] scheduled start at %s (in %s)\n", target.Format(time.RFC3339), target.Sub(now).Round(time.Second)))
+	pm.setBenchyRuntimeStatus(jobID, benchyStatusScheduled)
+
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		pm.setBenchyRuntimeStatus(jobID, benchyStatusRunning)
+		pm.appendBenchyOutput(jobID, "stdout", "[benchy] schedule reached, starting benchmark\n")
+		return nil
+	}
+}
+
+func (pm *ProxyManager) setBenchyRuntimeStatus(jobID string, status BenchyJobStatus) {
+	pm.benchyMu.Lock()
+	defer pm.benchyMu.Unlock()
+
+	job := pm.benchyJobs[jobID]
+	if job == nil {
+		return
+	}
+	job.Status = status
 }
 
 func parseAnyBool(v any) (bool, bool) {
@@ -1167,20 +1321,58 @@ func defaultBenchyOutputDir() string {
 
 func (pm *ProxyManager) benchyPythonShimDir() string {
 	if v := strings.TrimSpace(os.Getenv(benchyEnvPyShimDir)); v != "" {
+		v = normalizeDirPath(v)
 		if hasSiteCustomizeFile(v) {
 			return v
 		}
 		return ""
 	}
-	if pm == nil || strings.TrimSpace(pm.configPath) == "" {
-		return ""
+
+	var candidates []string
+	if pm != nil {
+		if cfgPath := strings.TrimSpace(pm.configPath); cfgPath != "" {
+			cfgPath = normalizeDirPath(cfgPath)
+			candidates = append(candidates, filepath.Join(filepath.Dir(cfgPath), "proxy", "pyshim"))
+		}
 	}
-	cfgDir := filepath.Dir(pm.configPath)
-	candidate := filepath.Join(cfgDir, "proxy", "pyshim")
-	if hasSiteCustomizeFile(candidate) {
-		return candidate
+	if wd, err := os.Getwd(); err == nil && strings.TrimSpace(wd) != "" {
+		candidates = append(candidates, filepath.Join(wd, "proxy", "pyshim"))
+	}
+	if exePath, err := os.Executable(); err == nil && strings.TrimSpace(exePath) != "" {
+		exeDir := filepath.Dir(exePath)
+		candidates = append(candidates, filepath.Join(exeDir, "..", "proxy", "pyshim"))
+	}
+
+	seen := make(map[string]struct{}, len(candidates))
+	for _, candidate := range candidates {
+		candidate = normalizeDirPath(candidate)
+		if candidate == "" {
+			continue
+		}
+		if _, ok := seen[candidate]; ok {
+			continue
+		}
+		seen[candidate] = struct{}{}
+		if hasSiteCustomizeFile(candidate) {
+			return candidate
+		}
 	}
 	return ""
+}
+
+func normalizeDirPath(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	if filepath.IsAbs(path) {
+		return filepath.Clean(path)
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return filepath.Clean(path)
+	}
+	return filepath.Clean(abs)
 }
 
 func hasSiteCustomizeFile(dir string) bool {
