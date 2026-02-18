@@ -242,6 +242,7 @@ export interface RecipeUpsertRequest {
   group?: string;
   unlisted?: boolean;
   benchyTrustRemoteCode?: boolean;
+  hotSwap?: boolean;
 }
 
 export interface ConfigEditorState {

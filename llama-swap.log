@@ -1,0 +1,43 @@
+Watching Configuration for changes
+llama-swap listening on http://0.0.0.0:8080
+[INFO] Request 192.168.8.225 "GET /api/version HTTP/1.1" 200 58 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36" 30.192µs
+[INFO] Request 127.0.0.1 "POST /api/models/unload HTTP/1.1" 200 12 "curl/8.5.0" 81.552µs
+[INFO] Request 127.0.0.1 "GET /api/recipes/state HTTP/1.1" 200 1789 "Python-urllib/3.12" 806.467µs
+[INFO] Request 127.0.0.1 "GET /api/models HTTP/1.1" 404 0 "curl/8.5.0" 24.128µs
+[INFO] Request 192.168.8.225 "GET /api/recipes/backend HTTP/1.1" 200 1141 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36" 7.201511ms
+[INFO] <Qwen/Qwen3-Coder-Next-vLLM-NEXT-Local-FP8> Health check passed on http://127.0.0.1:8094/health
+[INFO] Request 127.0.0.1 "GET /upstream/Qwen/Qwen3-Coder-Next-vLLM-NEXT-Local-FP8/ HTTP/1.1" 404 22 "curl/8.5.0" 7m40.25805725s
+2026/02/18 14:25:01 http: proxy error: context canceled
+[INFO] Request 127.0.0.1 "GET /upstream/Qwen/Qwen3-Coder-Next-vLLM-NEXT-Local-FP8/v1/models HTTP/1.1" 502 -1 "Python-urllib/3.12" 29.294454634s
+2026/02/18 14:25:01 http: proxy error: context canceled
+[INFO] Request 127.0.0.1 "GET /upstream/Qwen/Qwen3-Coder-Next-vLLM-NEXT-Local-FP8/v1/models HTTP/1.1" 502 -1 "Python-urllib/3.12" 17.284982408s
+[INFO] Request 127.0.0.1 "GET /upstream/Qwen/Qwen3-Coder-Next-vLLM-NEXT-Local-FP8/v1/models HTTP/1.1" 200 591 "Python-urllib/3.12" 5.27618324s
+[INFO] Request 127.0.0.1 "GET /upstream/Qwen/Qwen3-Coder-Next-vLLM-NEXT-Local-FP8/health HTTP/1.1" 200 -1 "curl/8.5.0" 847.923µs
+[INFO] Request 127.0.0.1 "GET /upstream/Qwen/Qwen3-Coder-Next-vLLM-NEXT-Local-FP8/v1/models HTTP/1.1" 200 591 "Python-urllib/3.12" 1.025524ms
+[WARN] metrics skipped, HTTP status=500, path=/v1/chat/completions
+[INFO] Request 127.0.0.1 "POST /upstream/Qwen/Qwen3-Coder-Next-vLLM-NEXT-Local-FP8/v1/chat/completions HTTP/1.1" 500 153 "Python-urllib/3.12" 12.026458353s
+[WARN] metrics skipped, HTTP status=500, path=/v1/chat/completions
+[INFO] Request 192.168.8.225 "POST /v1/chat/completions HTTP/1.1" 500 153 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36" 7.180776357s
+[INFO] <Qwen/Qwen3-Coder-Next-vLLM-NEXT-Local-FP8> process exited but not StateStopping, current state: ready
+[WARN] metrics skipped, HTTP status=502, path=/v1/chat/completions
+[INFO] Request 127.0.0.1 "POST /upstream/Qwen/Qwen3-Coder-Next-vLLM-NEXT-Local-FP8/v1/chat/completions HTTP/1.1" 502 66 "Python-urllib/3.12" 3m52.175528756s
+[WARN] <Qwen/Qwen3-Coder-Next-vLLM-NEXT-Local-FP8> ExitError >> signal: killed, exit code: -1
+[INFO] Request 192.168.8.225 "POST /api/cluster/stop HTTP/1.1" 404 174 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36" 10.500336908s
+[WARN] <Qwen/Qwen3-Coder-Next-vLLM-NEXT-Local-FP8> ExitError >> exit status 137, exit code: 137
+[INFO] <Qwen/Qwen3-Coder-Next-vLLM-NEXT-Local-FP8> process exited but not StateStopping, current state: starting
+[WARN] metrics skipped, HTTP status=502, path=/v1/chat/completions
+[INFO] Request 192.168.8.225 "POST /v1/chat/completions HTTP/1.1" 502 78 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36" 4m31.721325815s
+[INFO] Request 192.168.8.225 "GET /api/recipes/backend HTTP/1.1" 200 1141 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36" 95.232µs
+[INFO] Request 192.168.8.225 "PUT /api/recipes/backend HTTP/1.1" 200 801 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36" 22.936153ms
+Configuration Changed
+[WARN] metrics skipped, HTTP status=502, path=/v1/chat/completions
+[INFO] Request 127.0.0.1 "POST /v1/chat/completions HTTP/1.1" 502 66 "Python-urllib/3.12" 2m48.124603668s
+[INFO] Request 192.168.8.225 "GET /api/cluster/status HTTP/1.1" 200 2666 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36" 11.998750958s
+[WARN] <Qwen/Qwen3-Coder-Next-vLLM-NEXT-Local-FP8> ExitError >> signal: killed, exit code: -1
+[INFO] <Qwen/Qwen3-Coder-Next-vLLM-NEXT-Local-FP8> process exited but not StateStopping, current state: starting
+[INFO] Request 192.168.8.225 "GET /api/events HTTP/1.1" 200 201071 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36" 13m21.266205552s
+Configuration Reloaded
+[INFO] Request 192.168.8.225 "GET /api/version HTTP/1.1" 200 58 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36" 20.496µs
+[INFO] Request 192.168.8.121 "GET /api/recipes/backend HTTP/1.1" 200 801 "curl/8.5.0" 1.320342ms
+Received signal terminated, shutting down...
+[INFO] Request 192.168.8.225 "GET /api/events HTTP/1.1" 200 2555 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36" 9m1.244920284s

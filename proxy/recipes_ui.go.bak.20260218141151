@@ -79,7 +79,6 @@ type RecipeCatalogItem struct {
 	SoloOnly              bool   `json:"soloOnly"`
 	ClusterOnly           bool   `json:"clusterOnly"`
 	DefaultTensorParallel int    `json:"defaultTensorParallel"`
-	DefaultExtraArgs      string `json:"defaultExtraArgs,omitempty"`
 }
 
 type RecipeManagedModel struct {
@@ -158,7 +157,6 @@ type upsertRecipeModelRequest struct {
 	Group                 string   `json:"group"`
 	Unlisted              bool     `json:"unlisted,omitempty"`
 	BenchyTrustRemoteCode *bool    `json:"benchyTrustRemoteCode,omitempty"`
-	HotSwap               bool     `json:"hotSwap,omitempty"` // If true, don't stop cluster
 }
 
 type setRecipeBackendRequest struct {
@@ -704,28 +702,11 @@ func (pm *ProxyManager) upsertRecipeModel(req upsertRecipeModelRequest) (RecipeU
 	modelEntry["unlisted"] = req.Unlisted
 	modelEntry["aliases"] = cleanAliases(req.Aliases)
 
-	resolvedExtraArgs := strings.TrimSpace(req.ExtraArgs)
-	if resolvedExtraArgs == "" {
-		existingMeta := getMap(existing, "metadata")
-		existingRecipeMeta := getMap(existingMeta, recipeMetadataKey)
-		resolvedExtraArgs = strings.TrimSpace(getString(existingRecipeMeta, "extra_args"))
-	}
-	if resolvedExtraArgs == "" {
-		resolvedExtraArgs = strings.TrimSpace(catalogRecipe.DefaultExtraArgs)
-	}
-
-	// Hot swap mode: don't stop cluster, just swap model
-	hotSwap := req.HotSwap && mode == "cluster"
-
 	cmdStopExpr := "true"
 	stopPrefix := ""
 	if expr, ok := backendMacroExpr(root, "stop_cluster"); ok {
-		if hotSwap {
-			cmdStopExpr = "true" // Don't stop cluster in hot swap mode
-		} else {
-			cmdStopExpr = expr
-			stopPrefix = expr + "; "
-		}
+		cmdStopExpr = expr
+		stopPrefix = expr + "; "
 	}
 
 	runner := filepath.Join(recipesBackendDir(), "run-recipe.sh")
@@ -744,24 +725,12 @@ func (pm *ProxyManager) upsertRecipeModel(req upsertRecipeModelRequest) (RecipeU
 		cmdParts = append(cmdParts, " --tp ", strconv.Itoa(tp))
 	}
 	cmdParts = append(cmdParts, " --port ${PORT}")
-	if resolvedExtraArgs != "" {
-		cmdParts = append(cmdParts, " ", resolvedExtraArgs)
+	if extra := strings.TrimSpace(req.ExtraArgs); extra != "" {
+		cmdParts = append(cmdParts, " ", extra)
 	}
 	cmdParts = append(cmdParts, "'")
 
-	var cmd string
-	if hotSwap {
-		// Use hot-swap-model.sh for hot swap mode
-		hotSwapArgs := resolvedRecipeRef
-		if resolvedExtraArgs != "" {
-			hotSwapArgs = hotSwapArgs + " " + resolvedExtraArgs
-		}
-		cmd = fmt.Sprintf("bash -lc '%s %s'", filepath.Join(recipesBackendDir(), "hot-swap-model.sh"), hotSwapArgs)
-	} else {
-		cmd = strings.Join(cmdParts, "")
-	}
-
-	modelEntry["cmd"] = cmd
+	modelEntry["cmd"] = strings.Join(cmdParts, "")
 	modelEntry["cmdStop"] = fmt.Sprintf("bash -lc '%s'", cmdStopExpr)
 
 	meta := getMap(existing, "metadata")
@@ -774,10 +743,9 @@ func (pm *ProxyManager) upsertRecipeModel(req upsertRecipeModelRequest) (RecipeU
 		"mode":                     mode,
 		"tensor_parallel":          tp,
 		"nodes":                    nodes,
-		"extra_args":               resolvedExtraArgs,
+		"extra_args":               strings.TrimSpace(req.ExtraArgs),
 		"group":                    groupName,
 		"backend_dir":              recipesBackendDir(),
-		"hot_swap":                 hotSwap,
 	}
 	if req.BenchyTrustRemoteCode != nil {
 		benchyMeta := getMap(meta, "benchy")
@@ -1627,10 +1595,6 @@ func loadRecipeCatalog(backendDir string) ([]RecipeCatalogItem, map[string]Recip
 		if defaultTP <= 0 {
 			defaultTP = 1
 		}
-		defaultExtraArgs := strings.TrimSpace(stringFromAny(meta.Defaults["extra_args"]))
-		if defaultExtraArgs == "" {
-			defaultExtraArgs = strings.TrimSpace(stringFromAny(meta.Defaults["extraArgs"]))
-		}
 
 		item := RecipeCatalogItem{
 			ID:                    id,
@@ -1642,7 +1606,6 @@ func loadRecipeCatalog(backendDir string) ([]RecipeCatalogItem, map[string]Recip
 			SoloOnly:              meta.SoloOnly,
 			ClusterOnly:           meta.ClusterOnly,
 			DefaultTensorParallel: defaultTP,
-			DefaultExtraArgs:      defaultExtraArgs,
 		}
 		items = append(items, item)
 		byID[id] = item
@@ -2146,18 +2109,6 @@ func intFromAny(v any) int {
 		return i
 	default:
 		return 0
-	}
-}
-
-func stringFromAny(v any) string {
-	if v == nil {
-		return ""
-	}
-	switch t := v.(type) {
-	case string:
-		return strings.TrimSpace(t)
-	default:
-		return strings.TrimSpace(fmt.Sprintf("%v", t))
 	}
 }
 

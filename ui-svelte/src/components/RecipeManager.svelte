@@ -25,6 +25,7 @@
   let group = $state("managed-recipes");
   let unlisted = $state(false);
   let benchyTrustRemoteCode = $state<"auto" | "true" | "false">("auto");
+  let hotSwap = $state(false);
   let refreshController: AbortController | null = null;
 
   function clearForm(): void {
@@ -38,6 +39,7 @@
     mode = "cluster";
     tensorParallel = 2;
     nodes = "";
+    hotSwap = false;
     extraArgs = "";
     group = "managed-recipes";
     unlisted = false;
@@ -131,6 +133,7 @@
         extraArgs: extraArgs.trim(),
         group: group.trim(),
         unlisted,
+        hotSwap,
       };
       if (benchyTrustRemoteCode === "true") {
         payload.benchyTrustRemoteCode = true;
@@ -139,7 +142,9 @@
       }
 
       state = await upsertRecipeModel(payload);
-      notice = "Guardado. Swap Laboratories regeneró config.yaml automáticamente.";
+      notice = hotSwap
+        ? "Modelo cambiado sin reiniciar cluster (hot swap)."
+        : "Guardado. Swap Laboratories regeneró config.yaml automáticamente.";
       selectedModelID = id;
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
@@ -268,6 +273,10 @@
       <label class="text-sm flex items-center gap-2 pt-6">
         <input type="checkbox" bind:checked={unlisted} />
         unlisted
+      </label>
+      <label class="text-sm flex items-center gap-2 pt-2" title="No matar el cluster Ray al cambiar modelo (solo disponible en cluster mode)">
+        <input type="checkbox" bind:checked={hotSwap} />
+        <span>Hot Swap (no matar cluster)</span>
       </label>
     </div>
 
