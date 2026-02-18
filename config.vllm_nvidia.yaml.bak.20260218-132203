@@ -1,0 +1,153 @@
+groups:
+    big-ones:
+        exclusive: true
+        members:
+            - MiniMax-M2.5-AWQ
+            - Qwen/Qwen3-Coder-Next-FP8
+            - Qwen/Qwen3-Coder-Next-vLLM-NEXT
+            - gpt-oss-120b
+        swap: true
+    managed-recipes:
+        exclusive: true
+        members: []
+        swap: true
+    medium:
+        exclusive: true
+        members:
+            - GLM-4.7-Flash-AWQ-4bit
+            - Nemotron-3-Nano-NVFP4
+        swap: true
+healthCheckTimeout: 600
+hooks: null
+macros:
+    llama_root: /home/csolutions_ai/swap-laboratories
+    recipe_runner: /home/csolutions_ai/spark-vllm-docker-nvidia/run-recipe.sh
+    spark_root: /home/csolutions_ai/spark-vllm-docker-nvidia
+    user_home: ${env.HOME}
+    vllm_container: vllm_node
+    vllm_exec_env: -e VLLM_HOST_IP=${vllm_head_ip} -e RAY_NODE_IP_ADDRESS=${vllm_head_ip} -e RAY_OVERRIDE_NODE_IP_ADDRESS=${vllm_head_ip} -e NCCL_SOCKET_IFNAME=${vllm_iface} -e GLOO_SOCKET_IFNAME=${vllm_iface} -e TP_SOCKET_IFNAME=${vllm_iface}
+    vllm_head_ip: 192.168.200.12
+    vllm_iface: enp1s0f1np1
+    vllm_marlin_image: vllm-node-marlin-sm12x
+    vllm_nodes: 192.168.200.12,192.168.200.13
+    vllm_nvidia_nodes: 192.168.200.12,192.168.200.13
+    vllm_nvidia_stop_cluster: ${recipe_runner} --stop -n ${vllm_nvidia_nodes}
+    vllm_stop_cluster: |-
+        for n in $(echo "${vllm_nodes}" | tr "," " "); do
+          n="$(echo "$n" | xargs)";
+          if [ -z "$n" ]; then continue; fi;
+          if [ "$n" = "${vllm_head_ip}" ]; then continue; fi;
+          ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new "$n" "docker rm -f ${vllm_container} >/dev/null 2>&1 || true" || true;
+        done; docker rm -f ${vllm_container} >/dev/null 2>&1 || true
+models:
+    GLM-4.7-Flash-AWQ-4bit:
+        aliases:
+            - cyankiwi/GLM-4.7-Flash-AWQ-4bit
+            - glm-4.7-flash
+        checkEndpoint: /health
+        cmd: bash -lc '${vllm_stop_cluster}; exec ${recipe_runner} glm-4.7-flash-awq -n ${vllm_nodes} --tp 2 --port ${PORT}'
+        cmdStop: |
+            bash -lc '${vllm_stop_cluster}'
+        description: vLLM cyankiwi--AWQ
+        name: GLM-4.7-Flash-AWQ-4bit
+        proxy: http://127.0.0.1:${PORT}
+        ttl: 0
+        useModelName: glm-4.7-flash
+    MiniMax-M2.5-AWQ:
+        aliases:
+            - MiniMax-M2.5-AWQ
+            - cyankiwi/MiniMax-M2.5-AWQ-4bit
+        checkEndpoint: /health
+        cmd: bash -lc '${vllm_stop_cluster}; exec ${recipe_runner} minimax-m2.5-awq -n ${vllm_nodes} --tp 2 --port ${PORT}'
+        cmdStop: |
+            bash -lc '${vllm_stop_cluster}'
+        description: vLLM cyankiwi/MiniMax-M2.5-AWQ-4bit
+        name: MiniMax-M2.5-AWQ
+        proxy: http://127.0.0.1:${PORT}
+        ttl: 0
+        useModelName: cyankiwi/MiniMax-M2.5-AWQ-4bit
+    Nemotron-3-Nano-NVFP4:
+        aliases:
+            - nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4-nano
+        checkEndpoint: /health
+        cmd: bash -lc '${vllm_stop_cluster}; exec ${recipe_runner} nemotron-3-nano-nvfp4 --solo --port ${PORT}'
+        cmdStop: |
+            bash -lc '${vllm_stop_cluster}'
+        description: vLLM Nemotron nano recipe with custom parser/mods
+        metadata:
+            benchy:
+                trust_remote_code: true
+        name: Nemotron-3-Nano-NVFP4 (solo recipe)
+        proxy: http://127.0.0.1:${PORT}
+        ttl: 0
+        useModelName: nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4
+    Qwen/Qwen3-Coder-Next-FP8:
+        aliases:
+            - Qwen/Qwen3-Coder-Next-FP8
+        checkEndpoint: /health
+        cmd: bash -lc '${vllm_stop_cluster}; exec ${recipe_runner} qwen3-coder-next-fp8 -n ${vllm_nodes} --tp 2 --port ${PORT} --gpu-mem 0.7 --max-model-len 185000 -- --enable-prefix-caching'
+        cmdStop: bash -lc '${vllm_stop_cluster}'
+        description: vLLM Qwen3 NEXT FP8
+        metadata:
+            benchy:
+                trust_remote_code: true
+            recipe_ui:
+                backend_dir: /home/csolutions_ai/spark-vllm-docker
+                extra_args: --gpu-mem 0.7 --max-model-len 185000 -- --enable-prefix-caching
+                group: big-ones
+                managed: true
+                mode: cluster
+                nodes: ${vllm_nodes}
+                recipe_ref: qwen3-coder-next-fp8
+                tensor_parallel: 2
+        name: Qwen/Qwen3-Coder-Next-FP8
+        proxy: http://127.0.0.1:${PORT}
+        ttl: 0
+        unlisted: false
+        useModelName: Qwen/Qwen3-Coder-Next-FP8
+    Qwen/Qwen3-Coder-Next-vLLM-NEXT:
+        aliases: []
+        checkEndpoint: /health
+        cmd: bash -lc '${vllm_nvidia_stop_cluster}; exec ${recipe_runner} qwen3-coder-next-vllm-next -n ${vllm_nvidia_nodes} --tp 2 --port ${PORT} --gpu-mem 0.9 --max-model-len 185000 -- --enable-prefix-caching'
+        cmdStop: bash -lc '${vllm_nvidia_stop_cluster}'
+        description: vLLM NEXT Intel/Qwen3-Coder-Next-int4-AutoRound (solo)
+        metadata:
+            recipe_ui:
+                backend_dir: /home/csolutions_ai/spark-vllm-docker-nvidia
+                extra_args: --gpu-mem 0.9 --max-model-len 185000 -- --enable-prefix-caching
+                group: big-ones
+                managed: true
+                mode: cluster
+                nodes: ${vllm_nvidia_nodes}
+                recipe_ref: qwen3-coder-next-vllm-next
+                tensor_parallel: 2
+        name: Qwen3-Coder-Next-vLLM-NEXT
+        proxy: http://127.0.0.1:${PORT}
+        ttl: 0
+        unlisted: false
+        useModelName: Intel/Qwen3-Coder-Next-int4-AutoRound
+    gpt-oss-120b:
+        aliases:
+            - gpt-oss-120b
+            - openai/gpt-oss-120b
+        checkEndpoint: /health
+        cmd: bash -lc '${vllm_stop_cluster}; exec ${recipe_runner} openai-gpt-oss-120b -n ${vllm_nodes} --tp 2 --port ${PORT}'
+        cmdStop: |
+            bash -lc '${vllm_stop_cluster}'
+        description: vLLM MXFP4
+        metadata:
+            benchy:
+                trust_remote_code: false
+            recipe_ui:
+                backend_dir: /home/csolutions_ai/spark-vllm-docker
+                group: big-ones
+                managed: true
+                mode: cluster
+                nodes: ${vllm_nodes}
+                recipe_ref: openai-gpt-oss-120b
+                tensor_parallel: 2
+        name: GPT-OSS 120B
+        proxy: http://127.0.0.1:${PORT}
+        ttl: 0
+        useModelName: openai/gpt-oss-120b
+startPort: 8089

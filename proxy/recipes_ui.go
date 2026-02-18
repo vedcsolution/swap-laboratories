@@ -286,7 +286,6 @@ func (pm *ProxyManager) apiRunRecipeBackendAction(c *gin.Context) {
 	var cmd *exec.Cmd
 	var commandText string
 	var trtllmSourceImage string
-	var previousTRTLLMSourceImage string
 
 	switch action {
 	case "git_pull":
@@ -369,19 +368,27 @@ func (pm *ProxyManager) apiRunRecipeBackendAction(c *gin.Context) {
 			"-c",
 		)
 		cmd.Dir = backendDir
+	case "pull_trtllm_image":
+		if backendKind != "trtllm" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "pull_trtllm_image is only supported for TRT-LLM backend"})
+			return
+		}
+		trtllmImage := resolveTRTLLMSourceImage(backendDir, req.SourceImage)
+		if trtllmImage == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "source image is empty"})
+			return
+		}
+		commandText = fmt.Sprintf("docker pull %s", trtllmImage)
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Minute)
+		defer cancel()
+		cmd = exec.CommandContext(ctx, "docker", "pull", trtllmImage)
 	case "update_trtllm_image":
 		if backendKind != "trtllm" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "update_trtllm_image is only supported for TRT-LLM backend"})
 			return
 		}
-		if !hasBuildScript {
-			script := filepath.Join(backendDir, "build-and-copy.sh")
-			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("build script not found: %s", script)})
-			return
-		}
-		previousTRTLLMSourceImage = resolveTRTLLMSourceImage(backendDir, "")
-		trtllmSourceImage = resolveTRTLLMSourceImage(backendDir, req.SourceImage)
-		if trtllmSourceImage == "" {
+		trtllmImage := resolveTRTLLMSourceImage(backendDir, req.SourceImage)
+		if trtllmImage == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "source image is empty"})
 			return
 		}
@@ -389,22 +396,17 @@ func (pm *ProxyManager) apiRunRecipeBackendAction(c *gin.Context) {
 		if req.SourceImage == "" {
 			state := pm.recipeBackendState()
 			if state.BackendKind == "trtllm" && state.TRTLLMImage != nil && state.TRTLLMImage.Latest != "" {
-				trtllmSourceImage = state.TRTLLMImage.Latest
+				trtllmImage = state.TRTLLMImage.Latest
 			}
 		}
-		commandText = fmt.Sprintf(
-			"bash -lc \"./build-and-copy.sh -t %s --source-image $NEW_IMAGE -c; cleanup old image on local+peer nodes\"",
-			defaultTRTLLMImageTag,
-		)
-		ctx, cancel := context.WithTimeout(c.Request.Context(), 8*time.Hour)
+		if err := persistTRTLLMSourceImage(backendDir, trtllmImage); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to persist trtllm image: %v", err)})
+			return
+		}
+		commandText = fmt.Sprintf("docker pull %s && ./copy-image-to-peers.sh %s", trtllmImage, trtllmImage)
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Minute)
 		defer cancel()
-		cmd = exec.CommandContext(ctx, "bash", "-lc", trtllmUpdateScript(defaultTRTLLMImageTag))
-		cmd.Dir = backendDir
-		cmd.Env = append(
-			os.Environ(),
-			"NEW_IMAGE="+trtllmSourceImage,
-			"OLD_IMAGE="+previousTRTLLMSourceImage,
-		)
+		cmd = exec.CommandContext(ctx, "bash", "-lc", fmt.Sprintf("docker pull %s && if [ -f ./copy-image-to-peers.sh ]; then ./copy-image-to-peers.sh %s; fi", trtllmImage, trtllmImage))
 	case "pull_nvidia_image":
 		if backendKind != "nvidia" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "pull_nvidia_image is only supported for NVIDIA backend"})
@@ -987,9 +989,14 @@ func recipeBackendActionsForKind(kind, backendDir, repoURL string) []RecipeBacke
 	if kind == "trtllm" {
 		actions = append(actions,
 			RecipeBackendActionInfo{
+				Action:      "pull_trtllm_image",
+				Label:       "Pull TRT-LLM Image",
+				CommandHint: "docker pull <selected>",
+			},
+			RecipeBackendActionInfo{
 				Action:      "update_trtllm_image",
 				Label:       "Update TRT-LLM Image",
-				CommandHint: "./build-and-copy.sh -t trtllm-node --source-image <selected> -c + cleanup previous source image on peer nodes",
+				CommandHint: "docker pull <selected> + persist + copy to peers",
 			},
 		)
 		return actions

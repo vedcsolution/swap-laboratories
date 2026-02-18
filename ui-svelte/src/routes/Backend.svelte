@@ -106,8 +106,8 @@
         return "Building vLLM...";
       case "build_mxfp4":
         return "Building MXFP4...";
-      case "build_trtllm_image":
-        return "Building TRT-LLM image...";
+      case "pull_trtllm_image":
+        return "Pulling TRT-LLM image...";
       case "update_trtllm_image":
         return "Updating TRT-LLM image...";
       case "pull_nvidia_image":
@@ -189,7 +189,7 @@
 
     try {
       const opts =
-        (action === "build_trtllm_image" || action === "update_trtllm_image") && selectedTrtllmImage.trim()
+        (action === "pull_trtllm_image" || action === "update_trtllm_image") && selectedTrtllmImage.trim()
           ? { sourceImage: selectedTrtllmImage.trim() }
           : (action === "pull_nvidia_image" || action === "update_nvidia_image") && selectedNvidiaImage.trim()
           ? { sourceImage: selectedNvidiaImage.trim() }
@@ -201,7 +201,7 @@
       if (
         action === "git_pull" ||
         action === "git_pull_rebase" ||
-        action === "build_trtllm_image" ||
+        action === "pull_trtllm_image" ||
         action === "update_trtllm_image" ||
         action === "pull_nvidia_image" ||
         action === "update_nvidia_image"

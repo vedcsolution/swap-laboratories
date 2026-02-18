@@ -177,7 +177,7 @@ export type RecipeBackendAction =
   | "git_pull_rebase"
   | "build_vllm"
   | "build_mxfp4"
-  | "build_trtllm_image"
+  | "pull_trtllm_image"
   | "update_trtllm_image"
   | "pull_nvidia_image"
   | "update_nvidia_image";
