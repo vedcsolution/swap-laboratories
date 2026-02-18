@@ -170,7 +170,7 @@ export interface RecipeUIState {
 }
 
 export type RecipeBackendSource = "override" | "env" | "default";
-export type RecipeBackendKind = "vllm" | "sqlang" | "trtllm" | "custom";
+export type RecipeBackendKind = "vllm" | "sqlang" | "trtllm" | "nvidia" | "custom";
 
 export type RecipeBackendAction =
   | "git_pull"
@@ -178,7 +178,9 @@ export type RecipeBackendAction =
   | "build_vllm"
   | "build_mxfp4"
   | "build_trtllm_image"
-  | "update_trtllm_image";
+  | "update_trtllm_image"
+  | "pull_nvidia_image"
+  | "update_nvidia_image";
 
 export interface RecipeBackendActionInfo {
   action: RecipeBackendAction | string;
@@ -187,6 +189,15 @@ export interface RecipeBackendActionInfo {
 }
 
 export interface RecipeBackendTRTLLMImage {
+  selected: string;
+  default: string;
+  latest?: string;
+  updateAvailable?: boolean;
+  available?: string[];
+  warning?: string;
+}
+
+export interface RecipeBackendNVIDIAImage {
   selected: string;
   default: string;
   latest?: string;
@@ -205,6 +216,7 @@ export interface RecipeBackendState {
   repoUrl?: string;
   actions: RecipeBackendActionInfo[];
   trtllmImage?: RecipeBackendTRTLLMImage;
+  nvidiaImage?: RecipeBackendNVIDIAImage;
 }
 
 export interface RecipeBackendActionResponse {

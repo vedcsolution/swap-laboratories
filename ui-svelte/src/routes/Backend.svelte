@@ -17,6 +17,7 @@
   let actionCommand = $state("");
   let actionOutput = $state("");
   let selectedTrtllmImage = $state("");
+  let selectedNvidiaImage = $state("");
   let refreshController: AbortController | null = null;
 
   function sourceLabel(source: RecipeBackendState["backendSource"]): string {
@@ -32,7 +33,7 @@
   }
 
   function isNvidiaBackendOption(path: string): boolean {
-    return path.toLowerCase().includes("spark-trtllm-docker");
+    return path.toLowerCase().includes("spark-trtllm-docker") || path.toLowerCase().includes("spark-vllm-docker-nvidia");
   }
 
   function syncSelectionFromState(next: RecipeBackendState): void {
@@ -50,6 +51,12 @@
       selectedTrtllmImage = next.trtllmImage.selected;
     } else {
       selectedTrtllmImage = "";
+    }
+
+    if (next.nvidiaImage?.selected) {
+      selectedNvidiaImage = next.nvidiaImage.selected;
+    } else {
+      selectedNvidiaImage = "";
     }
   }
 
@@ -71,6 +78,24 @@
     return out;
   }
 
+  function nvidiaImageOptions(next: RecipeBackendState | null): string[] {
+    if (!next?.nvidiaImage) return [];
+    const out: string[] = [];
+    const push = (v?: string) => {
+      const value = (v || "").trim();
+      if (!value || out.includes(value)) return;
+      out.push(value);
+    };
+
+    push(next.nvidiaImage.selected);
+    push(next.nvidiaImage.default);
+    push(next.nvidiaImage.latest);
+    for (const img of next.nvidiaImage.available || []) {
+      push(img);
+    }
+    return out;
+  }
+
   function runningLabel(action: string): string {
     switch (action) {
       case "git_pull":
@@ -85,6 +110,10 @@
         return "Building TRT-LLM image...";
       case "update_trtllm_image":
         return "Updating TRT-LLM image...";
+      case "pull_nvidia_image":
+        return "Pulling NVIDIA image...";
+      case "update_nvidia_image":
+        return "Updating NVIDIA image...";
       default:
         return "Running...";
     }
@@ -162,6 +191,8 @@
       const opts =
         (action === "build_trtllm_image" || action === "update_trtllm_image") && selectedTrtllmImage.trim()
           ? { sourceImage: selectedTrtllmImage.trim() }
+          : (action === "pull_nvidia_image" || action === "update_nvidia_image") && selectedNvidiaImage.trim()
+          ? { sourceImage: selectedNvidiaImage.trim() }
           : undefined;
       const result = await runRecipeBackendAction(action as RecipeBackendAction, opts);
       actionCommand = result.command || "";
@@ -171,7 +202,9 @@
         action === "git_pull" ||
         action === "git_pull_rebase" ||
         action === "build_trtllm_image" ||
-        action === "update_trtllm_image"
+        action === "update_trtllm_image" ||
+        action === "pull_nvidia_image" ||
+        action === "update_nvidia_image"
       ) {
         await refresh();
       }
@@ -312,6 +345,45 @@
             </div>
           {/if}
           <div class="text-xs text-txtsecondary">Se guarda como preferencia de imagen para despliegues TRT-LLM.</div>
+        </div>
+      {/if}
+
+      {#if state.backendKind === "nvidia" && state.nvidiaImage}
+        <div class="mt-4 p-3 border border-card-border rounded bg-background/40 space-y-2">
+          <div class="text-sm text-txtsecondary">NVIDIA vLLM image (vllm-openai)</div>
+          {#if state.deploymentGuideUrl}
+            <div class="text-xs text-txtsecondary break-all">
+              Guía técnica:
+              <a class="underline text-cyan-300" href={state.deploymentGuideUrl} target="_blank" rel="noreferrer">{state.deploymentGuideUrl}</a>
+            </div>
+          {/if}
+          <select class="w-full px-2 py-1 rounded border border-card-border bg-background font-mono text-sm" bind:value={selectedNvidiaImage}>
+            {#each nvidiaImageOptions(state) as image}
+              <option value={image}>{image}</option>
+            {/each}
+          </select>
+          <input
+            class="input w-full font-mono text-sm"
+            bind:value={selectedNvidiaImage}
+            placeholder="vllm/vllm-openai:v0.6.6.post1"
+          />
+          <div class="text-xs text-txtsecondary break-all">default: <span class="font-mono">{state.nvidiaImage.default}</span></div>
+          {#if state.nvidiaImage.latest}
+            <div class="text-xs text-txtsecondary break-all">
+              latest: <span class="font-mono">{state.nvidiaImage.latest}</span>
+              {#if state.nvidiaImage.updateAvailable}
+                <span class="ml-2 text-amber-300 font-semibold">update available</span>
+              {:else}
+                <span class="ml-2 text-green-300">up-to-date</span>
+              {/if}
+            </div>
+          {/if}
+          {#if state.nvidiaImage.warning}
+            <div class="p-2 border border-amber-500/30 bg-amber-500/10 rounded text-xs text-amber-300 break-words">
+              {state.nvidiaImage.warning}
+            </div>
+          {/if}
+          <div class="text-xs text-txtsecondary">Se guarda como preferencia de imagen para despliegues NVIDIA vLLM.</div>
         </div>
       {/if}
 
