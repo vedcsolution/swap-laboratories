@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os/exec"
 	"strconv"
@@ -20,6 +21,7 @@ const (
 	dgxDashboardDBusService = "com.nvidia.dgx.dashboard.admin1"
 	dgxDashboardDBusObject  = "/com/nvidia/dgx/dashboard/admin"
 	dgxDashboardDBusIface   = "com.nvidia.dgx.dashboard.admin1"
+	dgxUpdateActionTimeout  = 2 * time.Minute
 )
 
 type clusterDGXUpdateRequest struct {
@@ -55,25 +57,34 @@ func (pm *ProxyManager) apiRunClusterDGXUpdate(c *gin.Context) {
 		}
 	}
 
-	discoverCtx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
-	defer cancel()
-	targets, localIP, err := discoverClusterNodeIPs(discoverCtx)
-	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{
-			"error": err.Error(),
-		})
-		return
-	}
-	allowedTargets := make(map[string]struct{}, len(targets))
-	for _, target := range targets {
-		allowedTargets[target] = struct{}{}
-	}
-
-	if len(req.Targets) > 0 {
-		requested := uniqueNonEmptyStrings(req.Targets)
-		filtered := make([]string, 0, len(requested))
-		for _, target := range requested {
-			if _, ok := allowedTargets[target]; ok {
+	localIP := ""
+	targets := uniqueNonEmptyStrings(req.Targets)
+	if len(targets) == 0 {
+		discoverCtx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
+		defer cancel()
+		discoveredTargets, discoveredLocalIP, err := discoverClusterNodeIPs(discoverCtx)
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{
+				"error": err.Error(),
+			})
+			return
+		}
+		targets = discoveredTargets
+		localIP = discoveredLocalIP
+	} else {
+		identityCtx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
+		defer cancel()
+		discoveredLocalIP, network, err := discoverLocalIPAndCIDR(identityCtx)
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{
+				"error": err.Error(),
+			})
+			return
+		}
+		localIP = discoveredLocalIP
+		filtered := make([]string, 0, len(targets))
+		for _, target := range targets {
+			if isTargetAllowedInCluster(target, localIP, network) {
 				filtered = append(filtered, target)
 			}
 		}
@@ -81,10 +92,11 @@ func (pm *ProxyManager) apiRunClusterDGXUpdate(c *gin.Context) {
 	}
 	if len(targets) == 0 {
 		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "no target nodes resolved for DGX update action",
+			"error": "no target nodes provided/resolved for DGX update action",
 		})
 		return
 	}
+	localIPs := localIPv4AddressSet()
 
 	startedAt := time.Now().UTC()
 	results := make([]clusterDGXUpdateNodeResult, len(targets))
@@ -93,12 +105,12 @@ func (pm *ProxyManager) apiRunClusterDGXUpdate(c *gin.Context) {
 	for idx, host := range targets {
 		idx := idx
 		host := host
-		isLocal := host == localIP
+		isLocal := host == localIP || isKnownLocalIP(localIPs, host)
 
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			actionCtx, actionCancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+			actionCtx, actionCancel := context.WithTimeout(c.Request.Context(), dgxUpdateActionTimeout)
 			defer actionCancel()
 
 			start := time.Now()
@@ -286,6 +298,92 @@ func discoverClusterNodeIPs(parentCtx context.Context) ([]string, string, error)
 	return uniqueNonEmptyStrings(nodes), localIP, nil
 }
 
+func discoverLocalIPAndCIDR(parentCtx context.Context) (string, *net.IPNet, error) {
+	autodiscoverPath := clusterAutodiscoverPath()
+	values, detectErrors := runAutodiscoverLocalSnapshot(parentCtx, autodiscoverPath)
+	localIP := strings.TrimSpace(values["LOCAL_IP"])
+	cidrRaw := strings.TrimSpace(values["CIDR"])
+
+	if localIP == "" {
+		detail := strings.Join(detectErrors, "; ")
+		if detail == "" {
+			detail = "local IP not found"
+		}
+		return "", nil, fmt.Errorf("unable to resolve local cluster identity: %s", detail)
+	}
+
+	if cidrRaw == "" {
+		return localIP, nil, nil
+	}
+
+	_, network, err := net.ParseCIDR(cidrRaw)
+	if err != nil {
+		return localIP, nil, nil
+	}
+	return localIP, network, nil
+}
+
+func runAutodiscoverLocalSnapshot(ctx context.Context, autodiscoverPath string) (map[string]string, []string) {
+	script := strings.Join([]string{
+		"set +e",
+		fmt.Sprintf("source %s", shellQuote(autodiscoverPath)),
+		fmt.Sprintf("kv(){ printf '%s%%s=%%s\\n' \"$1\" \"$2\"; }", clusterKVPrefix),
+		"detect_interfaces; _RC_IF=$?",
+		"detect_local_ip; _RC_LOCAL=$?",
+		"kv DETECT_INTERFACES_RC \"${_RC_IF}\"",
+		"kv DETECT_LOCAL_IP_RC \"${_RC_LOCAL}\"",
+		"kv LOCAL_IP \"${LOCAL_IP:-}\"",
+		"kv CIDR \"${CIDR:-}\"",
+	}, "\n")
+
+	cmd := exec.CommandContext(ctx, "bash", "-lc", script)
+	var output bytes.Buffer
+	cmd.Stdout = &output
+	cmd.Stderr = &output
+	runErr := cmd.Run()
+
+	values := make(map[string]string, 8)
+	detectErrors := make([]string, 0, 3)
+	for _, line := range strings.Split(output.String(), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, clusterKVPrefix) {
+			continue
+		}
+		kv := strings.TrimPrefix(line, clusterKVPrefix)
+		parts := strings.SplitN(kv, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		values[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
+	}
+
+	if runErr != nil && !errorsIsContextCanceled(runErr) {
+		detectErrors = append(detectErrors, "autodiscover command failed: "+runErr.Error())
+	}
+	appendDetectRCError(&detectErrors, "detect_interfaces", values["DETECT_INTERFACES_RC"])
+	appendDetectRCError(&detectErrors, "detect_local_ip", values["DETECT_LOCAL_IP_RC"])
+
+	return values, detectErrors
+}
+
+func isTargetAllowedInCluster(target, localIP string, network *net.IPNet) bool {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return false
+	}
+	if target == localIP || target == "127.0.0.1" || target == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(target)
+	if ip == nil {
+		return false
+	}
+	if network == nil {
+		return false
+	}
+	return network.Contains(ip)
+}
+
 func parseDBusBoolResult(raw string) (bool, error) {
 	first := ""
 	for _, line := range strings.Split(raw, "\n") {
@@ -313,6 +411,39 @@ func parseDBusBoolResult(raw string) (bool, error) {
 		return false, fmt.Errorf("empty output")
 	}
 	return false, fmt.Errorf("unexpected format: %s", first)
+}
+
+func localIPv4AddressSet() map[string]struct{} {
+	out := map[string]struct{}{
+		"127.0.0.1": {},
+		"localhost": {},
+	}
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return out
+	}
+	for _, addr := range addrs {
+		var ip net.IP
+		switch value := addr.(type) {
+		case *net.IPNet:
+			ip = value.IP
+		case *net.IPAddr:
+			ip = value.IP
+		}
+		if ip == nil {
+			continue
+		}
+		if ipv4 := ip.To4(); ipv4 != nil {
+			out[ipv4.String()] = struct{}{}
+		}
+	}
+	return out
+}
+
+func isKnownLocalIP(localIPs map[string]struct{}, host string) bool {
+	host = strings.TrimSpace(host)
+	_, ok := localIPs[host]
+	return ok
 }
 
 func parseDBusIntStringResult(raw string) (int, string, error) {
