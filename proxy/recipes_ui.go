@@ -106,16 +106,16 @@ type RecipeUIState struct {
 }
 
 type RecipeBackendState struct {
-	BackendDir         string                       `json:"backendDir"`
-	BackendSource      string                       `json:"backendSource"`
-	Options            []string                     `json:"options"`
-	BackendKind        string                       `json:"backendKind"`
-	BackendVendor      string                       `json:"backendVendor,omitempty"`
-	DeploymentGuideURL string                       `json:"deploymentGuideUrl,omitempty"`
-	RepoURL            string                       `json:"repoUrl,omitempty"`
-	Actions            []RecipeBackendActionInfo    `json:"actions"`
-	TRTLLMImage        *RecipeBackendTRTLLMImage    `json:"trtllmImage,omitempty"`
-	NVIDIAImage        *RecipeBackendNVIDIAImage    `json:"nvidiaImage,omitempty"`
+	BackendDir         string                    `json:"backendDir"`
+	BackendSource      string                    `json:"backendSource"`
+	Options            []string                  `json:"options"`
+	BackendKind        string                    `json:"backendKind"`
+	BackendVendor      string                    `json:"backendVendor,omitempty"`
+	DeploymentGuideURL string                    `json:"deploymentGuideUrl,omitempty"`
+	RepoURL            string                    `json:"repoUrl,omitempty"`
+	Actions            []RecipeBackendActionInfo `json:"actions"`
+	TRTLLMImage        *RecipeBackendTRTLLMImage `json:"trtllmImage,omitempty"`
+	NVIDIAImage        *RecipeBackendNVIDIAImage `json:"nvidiaImage,omitempty"`
 }
 
 type RecipeBackendActionInfo struct {
@@ -2127,14 +2127,6 @@ func resolveNVIDIASourceImage(backendDir, requested string) string {
 		return requested
 	}
 	return readDefaultNVIDIASourceImage(backendDir)
-}
-
-func tagFromImageRef(imageRef string) string {
-	parts := strings.Split(imageRef, ":")
-	if len(parts) >= 2 {
-		return parts[len(parts)-1]
-	}
-	return "latest"
 }
 
 func fetchNVIDIAReleaseTags(ctx context.Context) ([]string, error) {

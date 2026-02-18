@@ -24,7 +24,6 @@ import (
 )
 
 const (
-	PROFILE_SPLIT_CHAR    = ":"
 	maxInferenceBodyBytes = 32 << 20
 	maxMultipartFormBytes = 32 << 20
 )
@@ -647,8 +646,7 @@ func (pm *ProxyManager) proxyToUpstream(c *gin.Context) {
 		}
 	} else {
 		if err := processGroup.ProxyRequest(modelID, c.Writer, c.Request); err != nil {
-			pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error proxying request: %s", err.Error()))
-			pm.proxyLogger.Errorf("Error proxying upstream request for model %s, path=%s", modelID, originalPath)
+			pm.sendProxyRequestError(c, err, "Error proxying upstream request for model %s, path=%s", modelID, originalPath)
 			return
 		}
 	}
@@ -808,8 +806,7 @@ func (pm *ProxyManager) proxyInferenceHandler(c *gin.Context) {
 		}
 	} else {
 		if err := nextHandler(modelID, c.Writer, c.Request); err != nil {
-			pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error proxying request: %s", err.Error()))
-			pm.proxyLogger.Errorf("Error Proxying Request for model %s", modelID)
+			pm.sendProxyRequestError(c, err, "Error Proxying Request for model %s", modelID)
 			return
 		}
 	}
@@ -925,8 +922,7 @@ func (pm *ProxyManager) proxyOAIPostFormHandler(c *gin.Context) {
 
 	// Use the modified request for proxying
 	if err := nextHandler(modelID, c.Writer, modifiedReq); err != nil {
-		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error proxying request: %s", err.Error()))
-		pm.proxyLogger.Errorf("Error Proxying Request for model %s", modelID)
+		pm.sendProxyRequestError(c, err, "Error Proxying Request for model %s", modelID)
 		return
 	}
 }
@@ -951,10 +947,14 @@ func (pm *ProxyManager) proxyGETModelHandler(c *gin.Context) {
 	nextHandler := target.handler
 
 	if err := nextHandler(modelID, c.Writer, c.Request); err != nil {
-		pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error proxying request: %s", err.Error()))
-		pm.proxyLogger.Errorf("Error Proxying GET Request for model %s", modelID)
+		pm.sendProxyRequestError(c, err, "Error Proxying GET Request for model %s", modelID)
 		return
 	}
+}
+
+func (pm *ProxyManager) sendProxyRequestError(c *gin.Context, err error, logFormat string, logArgs ...any) {
+	pm.sendErrorResponse(c, http.StatusInternalServerError, fmt.Sprintf("error proxying request: %s", err.Error()))
+	pm.proxyLogger.Errorf(logFormat, logArgs...)
 }
 
 func (pm *ProxyManager) sendErrorResponse(c *gin.Context, statusCode int, message string) {

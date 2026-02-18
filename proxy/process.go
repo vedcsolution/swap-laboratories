@@ -127,8 +127,7 @@ func NewProcess(ID string, healthCheckTimeout int, config config.ModelConfig, pr
 		// concurrency limit
 		concurrencyLimitSemaphore: make(chan struct{}, concurrentLimit),
 
-		// To be removed when migration over exec.CommandContext is complete
-		// stop timeout
+		// Grace period before forcing process termination on stop.
 		gracefulStopTimeout: 10 * time.Second,
 		cmdWaitChan:         make(chan struct{}),
 	}
