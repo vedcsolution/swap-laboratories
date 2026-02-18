@@ -717,6 +717,62 @@ func (pm *ProxyManager) upsertRecipeModel(req upsertRecipeModelRequest) (RecipeU
 	// Hot swap mode: don't stop cluster, just swap model
 	hotSwap := req.HotSwap && mode == "cluster"
 
+	// Validate hot swap: only allow if using same container
+	if hotSwap {
+		// Simple validation: check if current recipe and new recipe use same container
+		// by reading the container field from both recipes
+		newRecipePath := filepath.Join(recipesBackendDir(), "recipes", resolvedRecipeRef+".yaml")
+		if newRecipeData, err := os.ReadFile(newRecipePath); err == nil {
+			newContainer := ""
+			for _, line := range strings.Split(string(newRecipeData), "\n") {
+				if strings.HasPrefix(line, "container:") {
+					newContainer = strings.TrimSpace(strings.TrimPrefix(line, "container:"))
+					break
+				}
+			}
+
+			// Check existing models in the same group
+			group := getMap(groupsMap, groupName)
+			for _, modelID := range groupMembers(group) {
+				if modelID == modelID {
+					continue
+				}
+				existingModel := getMap(modelsMap, modelID)
+				existingMeta := getMap(existingModel, "metadata")
+				if existingMeta == nil {
+					continue
+				}
+				existingRecipeMeta := getMap(existingMeta, recipeMetadataKey)
+				if existingRecipeMeta == nil {
+					continue
+				}
+				existingBackendDir, ok := existingRecipeMeta["backend_dir"].(string)
+				if !ok || existingBackendDir != recipesBackendDir() {
+					continue
+				}
+				existingRef, ok := existingRecipeMeta["recipe_ref"].(string)
+				if !ok {
+					continue
+				}
+				existingRecipePath := filepath.Join(recipesBackendDir(), "recipes", existingRef+".yaml")
+				existingRecipeData, err := os.ReadFile(existingRecipePath)
+				if err != nil {
+					continue
+				}
+				existingContainer := ""
+				for _, line := range strings.Split(string(existingRecipeData), "\n") {
+					if strings.HasPrefix(line, "container:") {
+						existingContainer = strings.TrimSpace(strings.TrimPrefix(line, "container:"))
+						break
+					}
+				}
+				if newContainer != "" && existingContainer != "" && newContainer != existingContainer {
+					return RecipeUIState{}, fmt.Errorf("hot swap no permitido: el modelo actual usa contenedor '%s' pero el nuevo modelo usa '%s'. Hot swap solo funciona si ambos modelos usan el mismo contenedor. Contenedores: vllm-node (minimax, nemotron, qwen3), vllm-node-tf5 (glm-4.7), vllm-node-mxfp4 (gpt-oss-120b)", existingContainer, newContainer)
+				}
+			}
+		}
+	}
+
 	cmdStopExpr := "true"
 	stopPrefix := ""
 	if expr, ok := backendMacroExpr(root, "stop_cluster"); ok {
