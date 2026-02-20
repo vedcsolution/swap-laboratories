@@ -3102,47 +3102,50 @@ func buildNVIDIAImageState(backendDir string) *RecipeBackendNVIDIAImage {
 }
 
 func getDockerContainers() ([]string, error) {
-	// Get list of vllm-node containers from docker
+	// Read local docker images and expose relevant tags for recipe container selection.
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "docker", "images", "--format", "{{.Repository}}", "--filter", "reference=~/vllm-node.*")
+	cmd := exec.CommandContext(ctx, "docker", "images", "--format", "{{.Repository}}:{{.Tag}}")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return nil, fmt.Errorf("failed to list docker containers: %w", err)
+		return nil, fmt.Errorf("failed to list docker images: %w", err)
 	}
 
-	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-	containers := make([]string, 0, len(lines))
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line != "" {
-			containers = append(containers, line)
-		}
-	}
-
-	// Always include common vllm-node containers
-	defaultContainers := []string{
+	// Always include common defaults so the UI is stable even if docker has no images yet.
+	containers := []string{
 		"vllm-next:latest",
 		"vllm-node:latest",
 		"vllm-node-12.0f:latest",
 		"vllm-node-mxfp4:latest",
 		"nvcr.io/nvidia/vllm:26.01-py3",
+		"avarok/dgx-vllm-nvfp4-kernel:v22",
 	}
 
-	// Merge with discovered containers, avoiding duplicates
-	for _, container := range containers {
-		found := false
-		for _, def := range defaultContainers {
-			if def == container || strings.Contains(def, container) {
-				found = true
-				break
-			}
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	discovered := make([]string, 0, len(lines))
+	for _, line := range lines {
+		image := strings.TrimSpace(line)
+		if image == "" {
+			continue
 		}
-		if !found {
-			defaultContainers = append(defaultContainers, container)
+		if strings.Contains(image, "<none>") {
+			continue
 		}
+
+		lower := strings.ToLower(image)
+		if !strings.Contains(lower, "vllm") && !strings.Contains(lower, "llama-cpp") && !strings.Contains(lower, "llamacpp") {
+			continue
+		}
+		discovered = append(discovered, image)
+	}
+	if len(discovered) > 1 {
+		sort.Strings(discovered)
 	}
 
-	return defaultContainers, nil
+	for _, image := range discovered {
+		containers = appendUniqueString(containers, image)
+	}
+
+	return containers, nil
 }
